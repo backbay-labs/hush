@@ -101,7 +101,7 @@ fn a_hung_engine_is_not_an_observation() {
 
 **Files:** `external/corpus.rs`, `external/score.rs`, `report.rs`; handwritten L2 cases in `fixtures/core/merge/` as needed, then regenerate fixture manifest.
 
-**Interfaces:** `Case {id:String, operation:Operation, input:Value, expectations:Vec<Expectation>}`; `Plan {cases:Vec<Case>, unattempted:Vec<VectorResult>}`; `plan_cases(&CorpusSnapshot, target_level:u8) -> Result<Plan,String>`; `score(&Case,&Response) -> Result<Vec<VectorResult>,String>`; `build_from_snapshot(Implementation,&Manifest,String,Vec<VectorResult>,String) -> Result<ConformanceReport,String>`. Original report::build delegates without changing its result; explicit L0 results disable legacy inference only for the external path.
+**Interfaces:** `Case {id:String, operation:Operation, input:Value, expectations:Vec<Expectation>}`; `Plan {cases:Vec<Case>, unattempted:Vec<VectorResult>}`; `plan_cases(&CorpusSnapshot, target_level:u8) -> Result<Plan,String>`; `score(&Case,&Response,ErrorCodes) -> Result<Vec<VectorResult>,String>`; `build_from_snapshot(Implementation,&Manifest,String,Vec<VectorResult>,String) -> Result<ConformanceReport,String>`. Original report::build delegates without changing its result; explicit L0 results disable legacy inference only for the external path.
 
 - [ ] Write literal/handwritten tests for unknown action deny, allowlist precedence, scalar source spelling, partial expected fields, default normalization, merge strategies, cycle rejection, missing subcases, conditional error-code checking, and unsupported operations. Confirm no expectation appears in any serialized request.
 
@@ -146,8 +146,8 @@ func TestEvaluateUnknownAction(t *testing.T) {
 `observe(operation string,input json.RawMessage) observation` is the adapter's
 operation dispatcher; observation has Status, Value and refusal/error fields.
 
-- [ ] Observe missing dispatcher failure, implement closed request decoding, binding echoes and operation-specific observations. Preserve absent optional expected fields; never include expected results or calculate a passed flag. For parse value projection, use the Go SDK's documented canonical projection, not Rust normalization.
-- [ ] Run `go test ./...`, `go vet ./...`, `go test -race ./...` from packages/go. Build `CGO_ENABLED=0 go build -trimpath -o ../../../target/hushspec-conformance-go ./cmd/hushspec-conformance` with corrected repository-relative output from packages/go (`../../target/hushspec-conformance-go`). Expected: real Go executable, all Go tests green.
+- [ ] Observe missing dispatcher failure, implement closed request decoding, binding echoes and operation-specific observations. Preserve absent optional expected fields; never include expected results or calculate a passed flag. Parse observations serialize the parsed SDK document, preserving unresolved extends and merge_strategy; test the valid extends-basic fixture. Canonicalization is a distinct operation, never a prerequisite for parse success.
+- [ ] Run `go test ./...`, `go vet ./...`, `go test -race ./...` from packages/go. Build `CGO_ENABLED=0 go build -trimpath -o ../../target/hushspec-conformance-go ./cmd/hushspec-conformance`. Expected: real Go executable, all Go tests green.
 - [ ] Commit `feat(go): add external conformance observation adapter`.
 
 ## Task 5: End-to-end controller and atomic completion packet
@@ -228,3 +228,27 @@ Go consumes the same operation/observation schema; controller produces the
 packet consumed by CI and docs. Tasks execute 1→2→3→4→5→6, with no concurrent
 source writes. Plan self-review and an independent pre-implementation review
 must resolve interface or scope conflicts before Task 1.
+
+## Reviewed contract refinements
+
+The independent pre-implementation review identified five Important interface
+gaps and two Minor refinements; all are incorporated before implementation:
+
+- Tasks 1/5 reject non-static ELF engine images and bind the running controller
+  through `/proc/self/exe`, not a replaceable launch pathname. Test both checks.
+- Tasks 3/4 preserve unresolved parse fields, schema-validate observed documents,
+  reject resolution fields on merge/resolve output before normalization, and
+  normalize only schema defaults and canonical presence rules. Tests retain
+  metadata, absent/default equivalence and presence-significant empty arrays.
+- Task 3 receives ErrorCodes explicitly; identical no-code refusals differ by
+  policy, and emitted codes/required diagnostics are always checked.
+- Task 3 assigns mandatory L0 rejection only to explicit syntax/profile/missing
+  version vectors. Other invalid vectors permit early rejection or deferred
+  validation at L0, while L1 independently requires rejection.
+- Tasks 1/5 cap aggregate retained request bytes at 64 MiB (maximum 256 MiB),
+  and each dispatch uses the smaller of per-case and remaining total deadline.
+- Tasks 3/4 canonicalize dependency aliases to a single logical source name;
+  add an alias-cycle regression and refuse undeclared document lookup.
+- Tasks 5/6 retain every planned result slot, including undispatched requests;
+  packet verification checks slot uniqueness/completeness and terminal-record
+  cardinality as well as every retained artifact digest.

@@ -89,7 +89,11 @@ The same staged binary contains the Go adapter and engine. This deliberately
 avoids claiming a separately listed but never executed engine artifact. Other
 engines may implement this monolithic executable protocol; interpreted/plugin
 engines need a separately reviewed dependency/execution binding before making
-equivalent provenance claims.
+equivalent provenance claims. The initial backend accepts only static ELF engine
+images: reject shebang/non-ELF images and ELF PT_INTERP or PT_DYNAMIC segments.
+This is a supported-format check, not proof that a static program cannot load
+other code. Snapshot the running controller through `/proc/self/exe`, not its
+replaceable launch pathname; that kernel handle is the sole symlink exception.
 
 ### Snapshot and corpus inventory
 
@@ -135,7 +139,7 @@ text without calling the Rust policy parser. Raw document and raw-YAML fixtures
 retain their exact source spelling.
 
 Responses have the same five binding fields and a closed tagged `result`:
-`ok` with an operation-specific observation; `rejected` with phase, diagnostic
+`ok` with an operation-specific `value`; `rejected` with phase, diagnostic
 and optional code; `unsupported`; or `error` with a diagnostic. Controller
 checks observation shape for the selected operation. Duplicate/trailing JSON,
 unknown fields, wrong IDs/digests/operations and multiple responses fail the
@@ -145,7 +149,7 @@ Observation contracts:
 
 | Operation | Observation |
 |---|---|
-| parse | Parsed document as JSON, retaining values for scalar assertions. |
+| parse | Parsed SDK document as JSON, retaining scalar values, extends and merge_strategy; no canonicalization requirement. |
 | validate | Validated document as JSON, or a phase/code-qualified refusal. |
 | merge | Merged document as JSON; no controller-side merge computation. |
 | resolve | Resolved document as JSON, or resolution refusal; root and dependency texts are supplied explicitly. |
@@ -165,14 +169,23 @@ literal expectations derived from committed vectors, not reference evaluation.
   `.expect.yaml` codes/diagnostics where applicable. Raw scalar cases receive
   exact `yaml` strings; check acceptance and declared value paths. Parser and
   validator failures remain separate, with explicit L0 result slots.
+  Mandatory L0 refusal is classified explicitly for syntax/profile/missing
+  version vectors, not inferred from registry codes. Other invalid documents
+  allow either parse acceptance or legitimate early policy refusal, with final
+  L1 rejection enforced independently. ErrorCodes is an explicit scoring input.
 - Merge directory conventions: base, child, expected sibling and refusal
   metadata come from captured files. Pinned/chain children use the engine's
   resolver. Expected documents may be decoded as data for comparison, but no
   reference merge/resolution runs. Compare normalized semantic document forms,
   explicitly accounting for omitted default fields, without hiding mismatches.
+  Validate observed document structure and reject any resolution fields in
+  merge/resolve results before normalizing schema defaults and canonical
+  empty-container presence rules. Preserve metadata and meaningful empty arrays.
 - Resolution: cover simple inheritance, all merge strategies, multi-hop chains,
   cycle rejection and unknown dependencies at L2. Add handwritten L2 cases
   where existing hash-oriented L4 fixtures cannot establish these independently.
+  Dependency aliases resolve to a single logical source identity; relative
+  names remain within the supplied map, with no ambient filesystem lookup.
 - Evaluator and library suites: one result per action. If the embedded policy
   extends, the engine's evaluate operation resolves it first using captured
   builtin documents within that same request; never call the reference resolver.
@@ -198,7 +211,9 @@ not prevent subsequent bounded cases from being scored.
 CLI limits: per-case deadline default 2000 ms (1..30000), total run deadline
 300000 ms (1..3600000), stdout 1 MiB and stderr 256 KiB per case (1..16 MiB),
 64 MiB aggregate captured output (1..256 MiB), 10000 cases. Requests are capped
-at 16 MiB each. Deadline includes response collection, not just leader exit.
+at 16 MiB each and 64 MiB aggregate (maximum configurable 256 MiB). Each dispatch
+uses the smaller of its case deadline and the remaining total deadline.
+Deadline includes response collection, not just leader exit.
 The request is prepared in a private regular file used as stdin; no potentially
 blocking stdin writer thread. Capture stdout/stderr through nonblocking pipes
 with bounded buffers, poll status/deadline/output budget, kill the process group
@@ -215,7 +230,8 @@ manifest, controller and engine image digests; declared materials; argument
 vector; scrubbed environment; OS/architecture; requested level; outcome;
 limits; source SHA / CI run / attempt when supplied by the operator/CI; all
 case bindings; process status, exit/signal, duration, bounded-output truncation;
-request/stdout/stderr relative paths and digests; and explicit limitations.
+request/stdout/stderr relative paths and digests; the complete unique planned
+result-slot inventory including undispatched cases; and explicit limitations.
 Keep the actual request/response/diagnostic bytes and staged executable image.
 The runner identifies controller code by its executable digest, not just a
 version string. Source/CI metadata are declared context, not cryptographic
