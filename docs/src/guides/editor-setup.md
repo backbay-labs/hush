@@ -43,6 +43,24 @@ HushSpec-specific names such as `hushspec.yaml`, `.hushspec.yaml` and
 `*.hushspec.yaml` also make policies easier to identify. Do not apply the core
 policy schema to every YAML file in a repository.
 
+## Filename associations
+
+The [prepared catalog entries](https://github.com/backbay-labs/hush/blob/main/docs/schemastore-entry.json)
+define these exact associations. Automatic discovery still depends on your
+editor's catalog version; use the explicit mapping above when it is unavailable.
+
+| Entry | Schema | Matches |
+| --- | --- | --- |
+| HushSpec | core policy | `hushspec.yaml` / `hushspec.yml`, `.hushspec.yaml` / `.hushspec.yml`, `*.hushspec.yaml` / `*.hushspec.yml` |
+| HushSpec Evaluator Test | evaluator test | `*.hushspec.test.yaml` / `*.hushspec.test.yml`, `**/fixtures/**/*.test.yaml` |
+| HushSpec Decision Receipt | receipt | `*.receipt.json` |
+| HushSpec Log Entry | log entry | `*.log-entry.json` |
+| HushSpec Policy Bundle | bundle | `*.bundle.json` |
+
+The default `policy.yaml` and `policy.test.yaml` files from `h2h init` rely on
+their schema modelines, not these filename patterns. A standalone log-entry
+JSON file is distinct from a JSONL stream.
+
 ## Validate JSON evidence and logs
 
 Select the appropriate [published schema](../reference/json-schema.md) for a
