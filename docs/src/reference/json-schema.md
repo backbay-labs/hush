@@ -41,7 +41,7 @@ The schemas are in the [`schemas/`](https://github.com/backbay-labs/hush/tree/ma
 | `hushspec-registry-rule-blocks.v0.schema.json` | Shape of [`spec/registries/rule-blocks.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/rule-blocks.yaml), the rule blocks `rules` may carry |
 | `hushspec-registry-rule-paths.v0.schema.json` | Shape of [`spec/registries/rule-paths.yaml`](https://github.com/backbay-labs/hush/blob/main/spec/registries/rule-paths.yaml), the rule paths a receipt may cite |
 
-The table is the whole of `schemas/`, and a test keeps it that way. Every
+The complete generated inventory below includes the frozen schemas too. Every
 schema is also embedded in the `h2h` binary; `h2h schema --list` prints the
 names and `h2h schema <name>` prints one to stdout.
 
@@ -88,18 +88,16 @@ The project does not operate that host: use the `.org` mirror's retrieval `url`
 for legacy schemas, without rewriting their IDs. Bundle predicate URIs are
 identifiers, not schema download URLs, and remain unchanged.
 
-The mdBook deployment also includes schema and registry copies as a documentation
-mirror; it does not configure the canonical host. Before the first website schema
-deployment, or for an exact revision, fetch a schema from GitHub, replacing `main`
-with the release commit or tag when pinning a version:
+The mdBook deployment includes schema and registry copies as a documentation
+mirror. For an exact release revision, fetch a schema from GitHub:
 
 ```
-https://raw.githubusercontent.com/backbay-labs/hush/main/schemas/hushspec-core.v1.schema.json
+https://raw.githubusercontent.com/backbay-labs/hush/v1.0.0/schemas/hushspec-core.v1.schema.json
 ```
 
-The canonical host serves its indexed source commit, while this fallback tracks
-`main`. They can differ until the website snapshot is updated. The index hashes
-check byte consistency; they do not independently authenticate the website.
+The canonical host serves its indexed source commit. The release URL pins the
+same release lineage. Index hashes check byte consistency; they do not
+independently authenticate the website.
 
 ## Usage
 
@@ -134,8 +132,8 @@ rules:
       - "**/.ssh/**"
 ```
 
-See [Where the schemas are served](#where-the-schemas-are-served) for the raw
-GitHub URL to substitute before the website schema snapshot is deployed.
+See [Where the schemas are served](#where-the-schemas-are-served) for pinned
+GitHub retrieval URLs and the distinction between identity and retrieval.
 
 Most YAML-aware editors (VS Code with the YAML extension, IntelliJ, etc.) will pick up the schema directive and provide autocompletion, hover documentation, and inline validation. See the [Editor Setup](../guides/editor-setup.md) guide for the SchemaStore zero-configuration option and workspace-settings alternative.
 
