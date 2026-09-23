@@ -298,20 +298,7 @@ impl Limits {
 }
 
 pub(crate) fn validate_schema(value: &serde_json::Value, name: &str) -> Result<(), EvidenceError> {
-    let schema = crate::generated_schemas::schema_body(name).ok_or_else(|| {
-        EvidenceError::new(EvidenceCode::Configuration, "missing embedded schema")
-    })?;
-    let schema: serde_json::Value = serde_json::from_str(schema)
-        .map_err(|_| EvidenceError::new(EvidenceCode::Configuration, "invalid embedded schema"))?;
-    let compiled = jsonschema::JSONSchema::options()
-        .should_validate_formats(true)
-        .compile(&schema)
-        .map_err(|_| {
-            EvidenceError::new(
-                EvidenceCode::Configuration,
-                "cannot compile embedded schema",
-            )
-        })?;
+    let compiled = schema_validator(name)?;
     if !compiled.is_valid(value) {
         return Err(EvidenceError::new(
             EvidenceCode::Malformed,
@@ -319,6 +306,23 @@ pub(crate) fn validate_schema(value: &serde_json::Value, name: &str) -> Result<(
         ));
     }
     Ok(())
+}
+
+pub(crate) fn schema_validator(name: &str) -> Result<jsonschema::JSONSchema, EvidenceError> {
+    let schema = crate::generated_schemas::schema_body(name).ok_or_else(|| {
+        EvidenceError::new(EvidenceCode::Configuration, "missing embedded schema")
+    })?;
+    let schema: serde_json::Value = serde_json::from_str(schema)
+        .map_err(|_| EvidenceError::new(EvidenceCode::Configuration, "invalid embedded schema"))?;
+    jsonschema::JSONSchema::options()
+        .should_validate_formats(true)
+        .compile(&schema)
+        .map_err(|_| {
+            EvidenceError::new(
+                EvidenceCode::Configuration,
+                "cannot compile embedded schema",
+            )
+        })
 }
 
 pub(crate) fn parse_document<T: serde::de::DeserializeOwned>(
@@ -593,5 +597,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), verification);
+    }
+
+    #[test]
+    fn verification_basis_can_name_all_declared_policy_artifacts() {
+        let schema: Value = serde_json::from_str(
+            crate::generated_schemas::schema_body("evidence-verification-experimental").unwrap(),
+        )
+        .unwrap();
+        let property_schema = json!({"$schema":"https://json-schema.org/draft/2020-12/schema", "$ref":"#/$defs/PropertyResult", "$defs":schema["$defs"]});
+        let validator = jsonschema::JSONSchema::compile(&property_schema).unwrap();
+        // 1024 policy declarations can each need an artifact, signature and
+        // origin limitation. A relative path may itself contain 4096 characters.
+        let basis = PropertyResult {
+            status: PropertyStatus::Verified,
+            scope: "declared policies".into(),
+            basis: vec![format!("{} ({})", "p".repeat(4096), "sha256:1".repeat(10)); 3072],
+        };
+        assert!(validator.is_valid(&serde_json::to_value(basis).unwrap()));
     }
 }

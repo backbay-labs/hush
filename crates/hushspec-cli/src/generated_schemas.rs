@@ -3359,11 +3359,11 @@ const SCHEMA_BODIES: &[(&str, &str)] = &[
           "items": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 4096,
+            "maxLength": 8192,
             "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
           },
           "minItems": 0,
-          "maxItems": 1024
+          "maxItems": 3072
         }
       }
     },
