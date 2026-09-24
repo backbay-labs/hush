@@ -153,7 +153,7 @@ runs:
     - name: Cache h2h binary
       if: inputs.version != 'source'
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ steps.platform.outputs.bindir }}
         key: hushspec-h2h-${{ steps.release.outputs.tag }}-${{ steps.platform.outputs.target }}-v1
