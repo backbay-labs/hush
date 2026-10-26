@@ -44,7 +44,7 @@ jobs:
       contains(github.event.inputs.packages, 'rust') ||
       contains(github.event.inputs.packages, 'all')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -129,9 +129,9 @@ jobs:
       contains(github.event.inputs.packages, 'npm') ||
       contains(github.event.inputs.packages, 'all')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -201,9 +201,9 @@ jobs:
           esac
           printf 'method=%s\n' "$method" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -222,13 +222,13 @@ jobs:
         if: steps.authentication.outputs.method == 'trusted'
         # Pinned to a commit: this step runs with id-token: write, so a
         # mutable ref would let a change upstream mint an upload token.
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: packages/python/dist
 
       - name: Publish to PyPI with explicitly selected token
         if: steps.authentication.outputs.method == 'token'
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: packages/python/dist
           password: ${{ secrets.PYPI_TOKEN }}
