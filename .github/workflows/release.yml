@@ -52,7 +52,7 @@ jobs:
             *) echo "::error::invalid dry-run mode"; exit 1 ;;
           esac
           printf 'checkout_ref=%s\n' "$checkout_ref" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ steps.selection.outputs.checkout_ref }}
       - name: Pin release candidate
@@ -107,14 +107,14 @@ jobs:
         shell: bash
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.candidate.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install cross
@@ -174,7 +174,7 @@ jobs:
                   raise SystemExit(f"artifact {field} mismatch: {actual.get(field)!r} != {value!r}")
           print(json.dumps(actual, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: h2h-${{ matrix.target }}
           path: h2h-*.tar.gz
@@ -192,7 +192,7 @@ jobs:
         shell: bash
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || { echo "::error::TAG must look like v<semver>: $TAG"; exit 1; }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.candidate.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
@@ -272,12 +272,12 @@ jobs:
               ./target/release/h2h bundle inspect "$bundle" >/dev/null
             fi
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: policy-bundles
           path: dist/bundles/*.bundle.json
           retention-days: 3
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name == 'workflow_dispatch' && inputs['dry-run']
         with:
           name: rehearsal-policy-public-key
@@ -308,7 +308,7 @@ jobs:
           rm dist/second.tar.gz
           ls -l "dist/hushspec-conformance-${version}.tar.gz"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: conformance-bundle
           path: dist/hushspec-conformance-*.tar.gz
@@ -330,14 +330,14 @@ jobs:
         run: |
           actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)
           [ "$actual_sha" = "$CANDIDATE_SHA" ] || { echo "::error::release tag moved after qualification"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: h2h-*
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: policy-bundles
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: conformance-bundle
       - name: Stage policy bundles
@@ -377,7 +377,7 @@ jobs:
       # installers (Homebrew, scripted installs) actually trust, unverifiable;
       # leaving the bundles out would ship compliance evidence with no
       # provenance of its own.
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             h2h-*.tar.gz
@@ -400,10 +400,10 @@ jobs:
     needs: [candidate, release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.candidate.outputs.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: h2h-*
           merge-multiple: true
@@ -434,14 +434,14 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.candidate.outputs.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: h2h-*
           merge-multiple: true
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
           registry-url: "https://registry.npmjs.org"
@@ -462,21 +462,21 @@ jobs:
       packages: write
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.candidate.outputs.sha }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Log in to ghcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
